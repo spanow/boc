@@ -9,11 +9,11 @@ impl Pallet {
     pub fn new() -> Self {
         Self {
             block_number: 0,
-            nonce: BTreeMap::new()
+            nonce: BTreeMap::new(),
         }
     }
 
-    pub fn block_number(&self)->u32 {
+    pub fn block_number(&self) -> u32 {
         self.block_number
     }
 
@@ -35,20 +35,20 @@ impl Pallet {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn init_system(){
+    fn init_system() {
         let system = super::Pallet::new();
         assert_eq!(system.block_number(), 0);
     }
 
     #[test]
-    fn inc_block_number(){
+    fn inc_block_number() {
         let mut system = super::Pallet::new();
         system.inc_block_number();
         assert_eq!(system.block_number(), 1);
     }
 
     #[test]
-    fn inc_nonce(){
+    fn inc_nonce() {
         let alice = String::from("alice");
         let mut system = super::Pallet::new();
         system.inc_nonce(&String::from(&alice.clone()));

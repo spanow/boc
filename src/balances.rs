@@ -6,7 +6,7 @@ pub struct Pallet {
 
 impl Pallet {
     pub fn new() -> Self {
-        Self{
+        Self {
             balances: BTreeMap::new()
         }
     }
@@ -20,7 +20,7 @@ impl Pallet {
     }
 
     pub fn transfer(&mut self, caller: String, to: String, amount: u128)
-        -> Result<(), &'static str> {
+                    -> Result<(), &'static str> {
         let caller_balance: u128 = self.get_balance(&caller);
         let to_balance: u128 = self.get_balance(&to);
 
@@ -38,3 +38,28 @@ impl Pallet {
     }
 }
 
+#[cfg(test)]
+mod tests {}
+#[test]
+fn init_balances() {
+    let mut balances = Pallet::new();
+
+    assert_eq!(balances.get_balance(&"alice".to_string()), 0);
+    balances.set_balance(&"alice".to_string(), 100);
+    assert_eq!(balances.get_balance(&"alice".to_string()), 100);
+    assert_eq!(balances.get_balance(&"bob".to_string()), 0);
+}
+
+#[test]
+fn transfer_balances() {
+    let alice = "alice".to_string();
+    let bob = "bob".to_string();
+
+    let mut balances = Pallet::new();
+
+    balances.set_balance(&"alice".to_string(), 100);
+    let _ = balances.transfer(alice.clone(), bob.clone(), 90);
+
+    assert_eq!(balances.get_balance(&alice), 10);
+    assert_eq!(balances.get_balance(&bob), 90);
+}
