@@ -1,15 +1,16 @@
-use crate::balances::Pallet;
 
 mod balances;
+mod system;
 
 fn main() {
     println!("Hello, world!");
-    //let mut pallet: Pallet = Pallet::new();
+    let mut balance = balances::Pallet::new();
+    let mut system = system::Pallet::new();
 }
 
 #[test]
 fn init_balances(){
-    let mut balances = Pallet::new();
+    let mut balances = balances::Pallet::new();
 
     assert_eq!(balances.get_balance(&"alice".to_string()), 0);
     balances.set_balance(&"alice".to_string(), 100);
@@ -22,7 +23,7 @@ fn transfer_balances(){
     let alice = "alice".to_string();
     let bob = "bob".to_string();
 
-    let mut balances = Pallet::new();
+    let mut balances = balances::Pallet::new();
 
     balances.set_balance(&"alice".to_string(), 100);
     let _ = balances.transfer(alice.clone(),bob.clone(),90);
