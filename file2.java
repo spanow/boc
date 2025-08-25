@@ -1,16 +1,16 @@
 // ============= 1. APPLICATION.YML =============
 /*
-# application.yml dans position-inventory-task
+# application.yml 
 spring:
   application:
     name: position-inventory-task
-  batch:
-    job:
-      enabled: true
 
 batch-job:
   name: position-inventory-api-transfer
   flow-type: API_TO_API
+  
+  # ICI ON SPECIFIE LE PROCESSOR !
+  processor-class: com.sgcib.position.inventory.task.processor.PositionDataProcessor
   
   source-api:
     enabled: true
@@ -19,9 +19,6 @@ batch-job:
     headers:
       Authorization: Bearer ${SOURCE_API_TOKEN}
       Accept: application/json
-    query-params:
-      page-size: 500
-      status: active
     connect-timeout: 30000
     read-timeout: 60000
     retry-count: 3
@@ -31,12 +28,11 @@ batch-job:
     
   destination-api:
     enabled: true
-    url: ${DEST_API_URL:https://api-destination.example.com/import/positions}
+    url: ${DEST_API_URL:https://api-destination.example.com/import}
     method: POST
     headers:
       Authorization: Bearer ${DEST_API_TOKEN}
       Content-Type: application/json
-      X-Client-Id: position-inventory
     connect-timeout: 30000
     read-timeout: 120000
     retry-count: 5
@@ -44,126 +40,42 @@ batch-job:
     delete-temp-file-after-use: true
 */
 
-// ============= 2. CUSTOM TASKLET WITH TRANSFORMATION =============
-// CustomApi2ApiTasklet.java
-package com.sgcib.position.inventory.task.tasklet;
+// ============= 2. LE PROCESSOR (C'EST TOUT CE DONT TU AS BESOIN!) =============
+// PositionDataProcessor.java
+package com.sgcib.position.inventory.task.processor;
 
-import com.sgcib.financing.lib.job.core.service.SourceApiService;
-import com.sgcib.financing.lib.job.core.service.DestinationApiService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.scope.context.ChunkContext;
-import org.springframework.batch.core.step.tasklet.Tasklet;
-import org.springframework.batch.repeat.RepeatStatus;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.batch.item.ItemProcessor;
 import org.springframework.stereotype.Component;
-import org.springframework.lang.NonNull;
 
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
-
-@Slf4j
-@Component
-public class CustomApi2ApiTasklet implements Tasklet {
-    
-    @Autowired
-    private SourceApiService sourceApiService;
-    
-    @Autowired
-    private DestinationApiService destinationApiService;
-    
-    @Autowired
-    private DataTransformer dataTransformer;
-    
-    @Override
-    public RepeatStatus execute(@NonNull StepContribution stepContribution, 
-                                @NonNull ChunkContext chunkContext) throws Exception {
-        
-        log.info("Starting Position Inventory API transfer with transformation");
-        
-        try {
-            // 1. Fetch data from source API
-            File tempFile = sourceApiService.fetchData();
-            log.info("Data fetched from source API");
-            
-            // 2. Transform the data
-            File transformedFile = dataTransformer.transformData(tempFile);
-            log.info("Data transformed successfully");
-            
-            // 3. Send transformed data to destination
-            destinationApiService.sendData(transformedFile);
-            log.info("Data sent to destination API");
-            
-            // Store in context if needed
-            chunkContext.getStepContext()
-                .getStepExecution()
-                .getJobExecution()
-                .getExecutionContext()
-                .put("records_processed", dataTransformer.getRecordsProcessed());
-            
-            log.info("Position Inventory API transfer completed. Records processed: {}", 
-                    dataTransformer.getRecordsProcessed());
-            
-        } catch (Exception e) {
-            log.error("Error during Position Inventory API transfer", e);
-            throw e;
-        }
-        
-        return RepeatStatus.FINISHED;
-    }
-}
-
-// ============= 3. DATA TRANSFORMER SERVICE =============
-// DataTransformer.java
-package com.sgcib.position.inventory.task.service;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.TextNode;
-import lombok.extern.slf4j.Slf4j;
-import lombok.Getter;
-import org.springframework.stereotype.Service;
-
-import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.Iterator;
 import java.util.Map;
 
 @Slf4j
-@Service
-public class DataTransformer {
+@Component
+public class PositionDataProcessor implements ItemProcessor<String, String> {
     
     private final ObjectMapper objectMapper = new ObjectMapper();
     
-    @Getter
-    private int recordsProcessed = 0;
-    
-    public File transformData(File sourceFile) throws Exception {
-        // Read source data
-        String jsonContent = Files.readString(sourceFile.toPath());
+    @Override
+    public String process(String jsonContent) throws Exception {
+        log.debug("Processing position data");
+        
+        // Parse JSON
         JsonNode rootNode = objectMapper.readTree(jsonContent);
         
-        // Transform the data
+        // Transform
         JsonNode transformedNode = transformNode(rootNode);
         
-        // Create new temp file for transformed data
-        Path transformedFile = Files.createTempFile("transformed_positions_", ".json");
-        String transformedJson = objectMapper.writeValueAsString(transformedNode);
-        Files.write(transformedFile, transformedJson.getBytes(), StandardOpenOption.WRITE);
+        // Return as string
+        String result = objectMapper.writeValueAsString(transformedNode);
+        log.info("Position data processed successfully");
         
-        log.info("Transformation complete. Original file: {}, Transformed file: {}", 
-                sourceFile.getName(), transformedFile.getFileName());
-        
-        return transformedFile.toFile();
+        return result;
     }
     
     private JsonNode transformNode(JsonNode node) {
@@ -171,7 +83,6 @@ public class DataTransformer {
             ArrayNode arrayNode = objectMapper.createArrayNode();
             for (JsonNode item : node) {
                 arrayNode.add(transformNode(item));
-                recordsProcessed++;
             }
             return arrayNode;
         } else if (node.isObject()) {
@@ -184,13 +95,17 @@ public class DataTransformer {
                 JsonNode fieldValue = field.getValue();
                 
                 // Transform field names
-                String transformedFieldName = transformFieldName(fieldName);
+                String transformedFieldName = fieldName
+                    .replace("etudiant", "student")
+                    .replace("Etudiant", "Student");
                 
-                // Transform field values
+                // Transform values
                 if (fieldValue.isTextual()) {
-                    String text = fieldValue.asText();
-                    String transformedText = transformText(text);
-                    objectNode.put(transformedFieldName, transformedText);
+                    String text = fieldValue.asText()
+                        .replace("Etudiant", "student")
+                        .replace("etudiant", "student")
+                        .replace("ETUDIANT", "STUDENT");
+                    objectNode.put(transformedFieldName, text);
                 } else if (fieldValue.isObject() || fieldValue.isArray()) {
                     objectNode.set(transformedFieldName, transformNode(fieldValue));
                 } else {
@@ -201,181 +116,160 @@ public class DataTransformer {
         }
         return node;
     }
-    
-    private String transformFieldName(String fieldName) {
-        // Transform field names if needed
-        return fieldName
-            .replace("etudiant", "student")
-            .replace("Etudiant", "Student");
-    }
-    
-    private String transformText(String text) {
-        // Replace "Etudiant" with "student" in text values
-        return text
-            .replace("Etudiant", "student")
-            .replace("etudiant", "student")
-            .replace("ETUDIANT", "STUDENT");
-    }
 }
 
-// ============= 4. CUSTOM STEP CONFIGURATION =============
-// PositionInventoryStepsConfig.java
-package com.sgcib.position.inventory.task.config;
+// ============= 3. MISE À JOUR DU TASKLET GENERIC (dans le starter) =============
+// Api2ApiTasklet.java (VERSION AMÉLIORÉE dans ton starter)
+package com.sgcib.financing.lib.job.core.tasklet;
 
-import com.sgcib.position.inventory.task.tasklet.CustomApi2ApiTasklet;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-@Configuration
-public class PositionInventoryStepsConfig {
-    
-    @Autowired
-    private StepBuilderFactory stepBuilderFactory;
-    
-    @Autowired
-    private CustomApi2ApiTasklet customApi2ApiTasklet;
-    
-    @Bean
-    public Step positionTransferStep() {
-        return stepBuilderFactory.get("position_transfer_with_transformation")
-                .tasklet(customApi2ApiTasklet)
-                .build();
-    }
-}
-
-// ============= 5. CUSTOM JOB CONFIGURATION =============
-// PositionInventoryJobConfig.java
-package com.sgcib.position.inventory.task.config;
-
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
-import org.springframework.batch.core.launch.support.RunIdIncrementer;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-@Configuration
-public class PositionInventoryJobConfig {
-    
-    @Autowired
-    private JobBuilderFactory jobBuilderFactory;
-    
-    @Autowired
-    @Qualifier("positionTransferStep")
-    private Step positionTransferStep;
-    
-    @Bean
-    public Job positionInventoryJob() {
-        return jobBuilderFactory.get("position_inventory_api_job")
-                .incrementer(new RunIdIncrementer())
-                .start(positionTransferStep)
-                .build();
-    }
-}
-
-// ============= 6. MAIN APPLICATION CLASS =============
-// PositionInventoryTaskApplication.java
-package com.sgcib.position.inventory.task;
-
-import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.ComponentScan;
-
-@SpringBootApplication
-@EnableBatchProcessing
-@ComponentScan(basePackages = {
-    "com.sgcib.position.inventory.task",
-    "com.sgcib.financing.lib.job.core"  // Pour scanner les composants du starter
-})
-public class PositionInventoryTaskApplication {
-    
-    public static void main(String[] args) {
-        SpringApplication.run(PositionInventoryTaskApplication.class, args);
-    }
-}
-
-// ============= 7. OPTIONAL: SCHEDULER SI TU VEUX =============
-// JobScheduler.java
-package com.sgcib.position.inventory.task.scheduler;
-
+import com.sgcib.financing.lib.job.core.service.SourceApiService;
+import com.sgcib.financing.lib.job.core.service.DestinationApiService;
+import com.sgcib.financing.lib.job.core.config.JobSettings;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.JobParameters;
-import org.springframework.batch.core.JobParametersBuilder;
-import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
+import org.springframework.lang.NonNull;
 
-import java.util.Date;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 
 @Slf4j
-@Component
-@EnableScheduling
-public class JobScheduler {
+public class Api2ApiTasklet implements Tasklet {
     
     @Autowired
-    private JobLauncher jobLauncher;
+    private SourceApiService sourceApiService;
     
     @Autowired
-    private Job positionInventoryJob;
+    private DestinationApiService destinationApiService;
     
-    @Scheduled(cron = "${batch.schedule.cron:0 0 2 * * ?}") // 2h du matin tous les jours
-    public void runPositionInventoryJob() {
+    @Autowired
+    private JobSettings jobSettings;
+    
+    @Autowired
+    private BeanFactory beanFactory;
+    
+    @Override
+    public RepeatStatus execute(@NonNull StepContribution stepContribution, 
+                                @NonNull ChunkContext chunkContext) throws Exception {
+        
+        log.info("Starting API to API transfer");
+        
         try {
-            JobParameters params = new JobParametersBuilder()
-                    .addDate("runDate", new Date())
-                    .toJobParameters();
-                    
-            jobLauncher.run(positionInventoryJob, params);
-            log.info("Position Inventory Job started successfully");
+            // 1. Fetch data from source API
+            File tempFile = sourceApiService.fetchData();
+            
+            // 2. Apply processor if configured
+            File fileToSend = tempFile;
+            if (jobSettings.getProcessorClass() != null) {
+                fileToSend = applyProcessor(tempFile);
+            }
+            
+            // 3. Send to destination API
+            destinationApiService.sendData(fileToSend);
+            
+            log.info("API to API transfer completed successfully");
             
         } catch (Exception e) {
-            log.error("Failed to start Position Inventory Job", e);
+            log.error("Error during API to API transfer", e);
+            throw e;
         }
+        
+        return RepeatStatus.FINISHED;
+    }
+    
+    @SuppressWarnings("unchecked")
+    private File applyProcessor(File sourceFile) throws Exception {
+        String processorClass = jobSettings.getProcessorClass();
+        log.info("Applying processor: {}", processorClass);
+        
+        // Get processor bean by class name
+        Class<?> clazz = Class.forName(processorClass);
+        ItemProcessor<String, String> processor = 
+            (ItemProcessor<String, String>) beanFactory.getBean(clazz);
+        
+        // Read source file
+        String content = Files.readString(sourceFile.toPath());
+        
+        // Process content
+        String processedContent = processor.process(content);
+        
+        // Write to new temp file
+        Path processedFile = Files.createTempFile("processed_", ".json");
+        Files.write(processedFile, processedContent.getBytes(), StandardOpenOption.WRITE);
+        
+        log.info("Processing complete. Processed file: {}", processedFile.getFileName());
+        
+        return processedFile.toFile();
     }
 }
 
-// ============= 8. POM.XML DEPENDENCIES =============
+// ============= 4. MISE À JOUR JobSettings (dans le starter) =============
+// JobSettings.java - Ajoute juste cette propriété
+package com.sgcib.financing.lib.job.core.config;
+
+import lombok.Getter;
+import lombok.Setter;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@Getter
+@Setter
+@ConfigurationProperties(prefix = "batch-job")
+public class JobSettings {
+    private String name;
+    private JobFlowType flowType;
+    private SourceApiSettings sourceApi;
+    private DestinationApiSettings destinationApi;
+    
+    // NOUVELLE PROPRIÉTÉ pour le processor
+    private String processorClass;
+    
+    // ... reste du code ...
+}
+
+// ============= 5. EXEMPLE DE PROCESSOR AVEC PROFILE (optionnel) =============
+// Si tu veux différents processors selon les profiles
+package com.sgcib.position.inventory.task.processor;
+
+@Component
+@Profile("eom-accounting")
+public class EOMAccountingProcessor implements ItemProcessor<String, String> {
+    
+    @Override
+    public String process(String jsonContent) throws Exception {
+        // Logique spécifique pour EOM Accounting
+        // Par exemple: ajouter des champs comptables, valider les montants, etc.
+        return jsonContent;
+    }
+}
+
+@Component
+@Profile("intraday")
+public class IntradayProcessor implements ItemProcessor<String, String> {
+    
+    @Override
+    public String process(String jsonContent) throws Exception {
+        // Logique spécifique pour Intraday
+        // Par exemple: filtrer par date du jour, etc.
+        return jsonContent;
+    }
+}
+
+// ============= 6. SI TU VEUX PAS DE PROCESSOR (pass-through) =============
 /*
-<dependencies>
-    <!-- Ton starter -->
-    <dependency>
-        <groupId>com.sgcib.financing.lib</groupId>
-        <artifactId>job-core-starter</artifactId>
-        <version>1.0.0</version>
-    </dependency>
-    
-    <!-- Spring Batch -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-batch</artifactId>
-    </dependency>
-    
-    <!-- Spring Web pour RestTemplate -->
-    <dependency>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-web</artifactId>
-    </dependency>
-    
-    <!-- Jackson pour JSON -->
-    <dependency>
-        <groupId>com.fasterxml.jackson.core</groupId>
-        <artifactId>jackson-databind</artifactId>
-    </dependency>
-    
-    <!-- Lombok -->
-    <dependency>
-        <groupId>org.projectlombok</groupId>
-        <artifactId>lombok</artifactId>
-        <scope>provided</scope>
-    </dependency>
-</dependencies>
+# application.yml - Sans processor, les données passent directement
+batch-job:
+  name: position-inventory-api-transfer
+  flow-type: API_TO_API
+  # processor-class: # Pas de processor = pas de transformation
+  
+  source-api:
+    enabled: true
+    url: ...
 */
