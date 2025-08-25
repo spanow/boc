@@ -1,6 +1,6 @@
 // ============= Settings Classes =============
 
-// 1. ApiEndpointSettings.java
+// 1. SourceApiSettings.java
 package com.sgcib.financing.lib.job.core.config.api;
 
 import io.micrometer.common.util.StringUtils;
@@ -11,7 +11,7 @@ import java.util.Map;
 
 @Getter
 @Setter
-public class ApiEndpointSettings {
+public class SourceApiSettings {
     private String url;
     private String method = "GET"; // GET or POST
     private Map<String, String> headers;
@@ -21,15 +21,45 @@ public class ApiEndpointSettings {
     private int readTimeout = 60000; // ms
     private int retryCount = 3;
     private long retryDelay = 1000; // ms
+    private boolean saveResponse = true; // Option to save response to temp file
     
     public void afterPropertiesSet() {
-        Assert.isTrue(StringUtils.isNotBlank(url), "url property is required");
+        Assert.isTrue(StringUtils.isNotBlank(url), "source url property is required");
         Assert.isTrue("GET".equals(method) || "POST".equals(method), 
-            "method must be GET or POST");
+            "source method must be GET or POST");
     }
 }
 
-// 2. Api2ApiSettings.java
+// 2. DestinationApiSettings.java
+package com.sgcib.financing.lib.job.core.config.api;
+
+import io.micrometer.common.util.StringUtils;
+import org.springframework.util.Assert;
+import lombok.Getter;
+import lombok.Setter;
+import java.util.Map;
+
+@Getter
+@Setter
+public class DestinationApiSettings {
+    private String url;
+    private String method = "POST"; // Default POST for destination
+    private Map<String, String> headers;
+    private Map<String, String> queryParams;
+    private int connectTimeout = 30000; // ms
+    private int readTimeout = 120000; // ms - longer for destination
+    private int retryCount = 5; // More retries for destination
+    private long retryDelay = 2000; // ms
+    private boolean transformPayload = false; // Option for future transformation
+    
+    public void afterPropertiesSet() {
+        Assert.isTrue(StringUtils.isNotBlank(url), "destination url property is required");
+        Assert.isTrue("GET".equals(method) || "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method), 
+            "destination method must be GET, POST, PUT or PATCH");
+    }
+}
+
+// 3. Api2ApiSettings.java
 package com.sgcib.financing.lib.job.core.config.api;
 
 import lombok.Getter;
@@ -40,8 +70,8 @@ import org.springframework.util.Assert;
 @Setter
 public class Api2ApiSettings {
     private boolean enabled;
-    private ApiEndpointSettings source;
-    private ApiEndpointSettings destination;
+    private SourceApiSettings source;
+    private DestinationApiSettings destination;
     private String tempFilePrefix = "api2api_";
     private String tempFileSuffix = ".json";
     private boolean deleteTempFileAfterUse = true;
@@ -60,7 +90,7 @@ public class Api2ApiSettings {
 
 // ============= Configuration Classes =============
 
-// 3. Api2ApiConfiguration.java
+// 4. Api2ApiConfiguration.java
 package com.sgcib.financing.lib.job.core.config.api;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -82,7 +112,7 @@ public class Api2ApiConfiguration {
 
 // ============= Service Class =============
 
-// 4. Api2ApiService.java
+// 5. Api2ApiService.java
 package com.sgcib.financing.lib.job.core.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -123,7 +153,7 @@ public class Api2ApiService {
     }
     
     public File fetchFromSourceApi() throws IOException {
-        ApiEndpointSettings source = api2ApiSettings.getSource();
+        SourceApiSettings source = api2ApiSettings.getSource();
         
         // Build URL with query parameters
         UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(source.getUrl());
@@ -177,23 +207,40 @@ public class Api2ApiService {
             }
         }
         
-        // Save response to temp file
+        // Save response to temp file if enabled
+        if (source.isSaveResponse()) {
+            Path tempFile = Files.createTempFile(
+                api2ApiSettings.getTempFilePrefix(),
+                api2ApiSettings.getTempFileSuffix()
+            );
+            
+            Files.write(tempFile, response.getBody().getBytes(), StandardOpenOption.WRITE);
+            log.info("Source API response saved to temp file: {}", tempFile);
+            
+            return tempFile.toFile();
+        }
+        
+        // If not saving, create temp file anyway for consistency
         Path tempFile = Files.createTempFile(
             api2ApiSettings.getTempFilePrefix(),
             api2ApiSettings.getTempFileSuffix()
         );
-        
         Files.write(tempFile, response.getBody().getBytes(), StandardOpenOption.WRITE);
-        log.info("Source API response saved to temp file: {}", tempFile);
         
         return tempFile.toFile();
     }
     
     public void sendToDestinationApi(File tempFile) throws IOException {
-        ApiEndpointSettings destination = api2ApiSettings.getDestination();
+        DestinationApiSettings destination = api2ApiSettings.getDestination();
         
         // Read data from temp file
         String jsonContent = Files.readString(tempFile.toPath());
+        
+        // Optional: Transform payload if needed (future enhancement)
+        if (destination.isTransformPayload()) {
+            // Add transformation logic here if needed
+            log.debug("Payload transformation is enabled but not implemented yet");
+        }
         
         // Send to destination
         sendRequest(jsonContent, destination);
@@ -205,7 +252,7 @@ public class Api2ApiService {
         }
     }
     
-    private void sendRequest(String payload, ApiEndpointSettings destination) {
+    private void sendRequest(String payload, DestinationApiSettings destination) {
         UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(destination.getUrl());
         if (destination.getQueryParams() != null) {
             destination.getQueryParams().forEach(uriBuilder::queryParam);
@@ -217,32 +264,37 @@ public class Api2ApiService {
             destination.getHeaders().forEach(headers::add);
         }
         
+        // Configure timeout for destination
+        restTemplate.getRequestFactory().setConnectTimeout(destination.getConnectTimeout());
+        restTemplate.getRequestFactory().setReadTimeout(destination.getReadTimeout());
+        
         int attempts = 0;
         while (attempts < destination.getRetryCount()) {
             try {
                 ResponseEntity<String> response;
+                HttpMethod method = HttpMethod.valueOf(destination.getMethod());
                 
                 if ("GET".equals(destination.getMethod())) {
-                    // For GET, you might want to send data as query params
                     HttpEntity<String> entity = new HttpEntity<>(headers);
                     response = restTemplate.exchange(
                         uriBuilder.toUriString(),
-                        HttpMethod.GET,
+                        method,
                         entity,
                         String.class
                     );
                 } else {
+                    // POST, PUT, PATCH
                     HttpEntity<String> entity = new HttpEntity<>(payload, headers);
                     response = restTemplate.exchange(
                         uriBuilder.toUriString(),
-                        HttpMethod.POST,
+                        method,
                         entity,
                         String.class
                     );
                 }
                 
                 if (response.getStatusCode().is2xxSuccessful()) {
-                    log.info("Successfully sent data to destination API");
+                    log.info("Successfully sent data to destination API with status: {}", response.getStatusCode());
                     return;
                 }
             } catch (Exception e) {
@@ -263,7 +315,7 @@ public class Api2ApiService {
 
 // ============= Tasklet Class =============
 
-// 5. Api2ApiTasklet.java
+// 6. Api2ApiTasklet.java
 package com.sgcib.financing.lib.job.core.tasklet;
 
 import com.sgcib.financing.lib.job.core.service.Api2ApiService;
@@ -316,7 +368,7 @@ public class Api2ApiTasklet implements Tasklet {
 
 // ============= Flow Configuration =============
 
-// 6. Update JobFlowType.java (add new enum)
+// 7. Update JobFlowType.java (add new enum)
 package com.sgcib.financing.lib.job.core.config.flows;
 
 public enum JobFlowType {
@@ -324,7 +376,7 @@ public enum JobFlowType {
     API_TO_API
 }
 
-// 7. Api2ApiFlow.java
+// 8. Api2ApiFlow.java
 package com.sgcib.financing.lib.job.core.config.flows;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -351,7 +403,22 @@ public class Api2ApiFlow extends AbstractJobConfiguration {
     }
 }
 
-// 8. Update StepsConfiguration.java (add new bean and step)
+// 9. Update JobSettings.java (add api2api property)
+// Add this to your existing JobSettings class:
+/*
+@Getter
+@Setter
+@ConfigurationProperties(prefix = "batch-job")
+public class JobSettings {
+    // ... existing properties ...
+    
+    private Api2ApiSettings api2api;
+    
+    // ... rest of the class ...
+}
+*/
+
+// 10. Update StepsConfiguration.java (add new bean and step)
 // Add these methods to your existing StepsConfiguration class:
 
 @Bean
@@ -393,7 +460,8 @@ batch-job:
       connect-timeout: 30000
       read-timeout: 60000
       retry-count: 3
-      retry-delay: 2000
+      retry-delay: 1000
+      save-response: true
       
     destination:
       url: https://api.destination.com/import
@@ -404,5 +472,6 @@ batch-job:
       connect-timeout: 30000
       read-timeout: 120000
       retry-count: 5
-      retry-delay: 3000
+      retry-delay: 2000
+      transform-payload: false
 */
