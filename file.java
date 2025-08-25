@@ -29,9 +29,9 @@ public class SourceApiSettings {
         if (!enabled) {
             return;
         }
-        Assert.isTrue(StringUtils.isNotBlank(url), "source API url property is required");
+        Assert.isTrue(StringUtils.isNotBlank(url), "source-api url property is required");
         Assert.isTrue("GET".equals(method) || "POST".equals(method), 
-            "source API method must be GET or POST");
+            "source-api method must be GET or POST");
     }
 }
 
@@ -62,54 +62,16 @@ public class DestinationApiSettings {
         if (!enabled) {
             return;
         }
-        Assert.isTrue(StringUtils.isNotBlank(url), "destination API url property is required");
+        Assert.isTrue(StringUtils.isNotBlank(url), "destination-api url property is required");
         Assert.isTrue("GET".equals(method) || "POST".equals(method) || 
                      "PUT".equals(method) || "PATCH".equals(method), 
-            "destination API method must be GET, POST, PUT or PATCH");
-    }
-}
-
-// 3. SourceSettings.java
-package com.sgcib.financing.lib.job.core.config;
-
-import com.sgcib.financing.lib.job.core.config.api.SourceApiSettings;
-import lombok.Getter;
-import lombok.Setter;
-
-@Getter
-@Setter
-public class SourceSettings {
-    private SourceApiSettings api;
-    
-    public void afterPropertiesSet() {
-        if (api != null) {
-            api.afterPropertiesSet();
-        }
-    }
-}
-
-// 4. DestinationSettings.java
-package com.sgcib.financing.lib.job.core.config;
-
-import com.sgcib.financing.lib.job.core.config.api.DestinationApiSettings;
-import lombok.Getter;
-import lombok.Setter;
-
-@Getter
-@Setter
-public class DestinationSettings {
-    private DestinationApiSettings api;
-    
-    public void afterPropertiesSet() {
-        if (api != null) {
-            api.afterPropertiesSet();
-        }
+            "destination-api method must be GET, POST, PUT or PATCH");
     }
 }
 
 // ============= Configuration Classes =============
 
-// 5. SourceApiConfiguration.java
+// 3. SourceApiConfiguration.java
 package com.sgcib.financing.lib.job.core.config.api;
 
 import com.sgcib.financing.lib.job.core.config.JobSettings;
@@ -119,18 +81,18 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.util.Assert;
 
 @Configuration
-@ConditionalOnProperty(value = "batch-job.source.api.enabled", havingValue = "true")
+@ConditionalOnProperty(value = "batch-job.source-api.enabled", havingValue = "true")
 public class SourceApiConfiguration {
     
     @Autowired
     public void setJobSettings(JobSettings settings) {
-        SourceApiSettings sourceApiSettings = settings.getSource().getApi();
-        Assert.notNull(sourceApiSettings, "source API settings is required in yml");
-        sourceApiSettings.afterPropertiesSet();
+        SourceApiSettings sourceApi = settings.getSourceApi();
+        Assert.notNull(sourceApi, "source-api settings is required in yml");
+        sourceApi.afterPropertiesSet();
     }
 }
 
-// 6. DestinationApiConfiguration.java
+// 4. DestinationApiConfiguration.java
 package com.sgcib.financing.lib.job.core.config.api;
 
 import com.sgcib.financing.lib.job.core.config.JobSettings;
@@ -140,20 +102,20 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.util.Assert;
 
 @Configuration
-@ConditionalOnProperty(value = "batch-job.destination.api.enabled", havingValue = "true")
+@ConditionalOnProperty(value = "batch-job.destination-api.enabled", havingValue = "true")
 public class DestinationApiConfiguration {
     
     @Autowired
     public void setJobSettings(JobSettings settings) {
-        DestinationApiSettings destinationApiSettings = settings.getDestination().getApi();
-        Assert.notNull(destinationApiSettings, "destination API settings is required in yml");
-        destinationApiSettings.afterPropertiesSet();
+        DestinationApiSettings destinationApi = settings.getDestinationApi();
+        Assert.notNull(destinationApi, "destination-api settings is required in yml");
+        destinationApi.afterPropertiesSet();
     }
 }
 
 // ============= Service Classes =============
 
-// 7. SourceApiService.java
+// 5. SourceApiService.java
 package com.sgcib.financing.lib.job.core.service;
 
 import com.sgcib.financing.lib.job.core.config.JobSettings;
@@ -174,43 +136,43 @@ import java.nio.file.StandardOpenOption;
 
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "batch-job.source.api.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "batch-job.source-api.enabled", havingValue = "true")
 public class SourceApiService {
     
-    private SourceApiSettings sourceApiSettings;
+    private SourceApiSettings sourceApi;
     private RestTemplate restTemplate;
     
     @Autowired
     public void setJobSettings(JobSettings settings) {
-        this.sourceApiSettings = settings.getSource().getApi();
-        Assert.notNull(sourceApiSettings, "Source API settings is required");
+        this.sourceApi = settings.getSourceApi();
+        Assert.notNull(sourceApi, "Source API settings is required");
         
         this.restTemplate = new RestTemplate();
         
         // Configure RestTemplate timeouts
-        restTemplate.getRequestFactory().setConnectTimeout(sourceApiSettings.getConnectTimeout());
-        restTemplate.getRequestFactory().setReadTimeout(sourceApiSettings.getReadTimeout());
+        restTemplate.getRequestFactory().setConnectTimeout(sourceApi.getConnectTimeout());
+        restTemplate.getRequestFactory().setReadTimeout(sourceApi.getReadTimeout());
     }
     
     public File fetchData() throws IOException {
         // Build URL with query parameters
-        UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(sourceApiSettings.getUrl());
-        if (sourceApiSettings.getQueryParams() != null) {
-            sourceApiSettings.getQueryParams().forEach(uriBuilder::queryParam);
+        UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(sourceApi.getUrl());
+        if (sourceApi.getQueryParams() != null) {
+            sourceApi.getQueryParams().forEach(uriBuilder::queryParam);
         }
         
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (sourceApiSettings.getHeaders() != null) {
-            sourceApiSettings.getHeaders().forEach(headers::add);
+        if (sourceApi.getHeaders() != null) {
+            sourceApi.getHeaders().forEach(headers::add);
         }
         
         ResponseEntity<String> response = null;
         int attempts = 0;
         
-        while (attempts < sourceApiSettings.getRetryCount()) {
+        while (attempts < sourceApi.getRetryCount()) {
             try {
-                if ("GET".equals(sourceApiSettings.getMethod())) {
+                if ("GET".equals(sourceApi.getMethod())) {
                     HttpEntity<String> entity = new HttpEntity<>(headers);
                     response = restTemplate.exchange(
                         uriBuilder.toUriString(),
@@ -218,9 +180,9 @@ public class SourceApiService {
                         entity,
                         String.class
                     );
-                } else if ("POST".equals(sourceApiSettings.getMethod())) {
+                } else if ("POST".equals(sourceApi.getMethod())) {
                     HttpEntity<String> entity = new HttpEntity<>(
-                        sourceApiSettings.getRequestBodyTemplate(), 
+                        sourceApi.getRequestBodyTemplate(), 
                         headers
                     );
                     response = restTemplate.exchange(
@@ -237,11 +199,11 @@ public class SourceApiService {
             } catch (Exception e) {
                 attempts++;
                 log.warn("Attempt {} failed for source API: {}", attempts, e.getMessage());
-                if (attempts >= sourceApiSettings.getRetryCount()) {
+                if (attempts >= sourceApi.getRetryCount()) {
                     throw new RuntimeException("Failed to fetch from source API after " + attempts + " attempts", e);
                 }
                 try {
-                    Thread.sleep(sourceApiSettings.getRetryDelay());
+                    Thread.sleep(sourceApi.getRetryDelay());
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 }
@@ -250,8 +212,8 @@ public class SourceApiService {
         
         // Save response to temp file
         Path tempFile = Files.createTempFile(
-            sourceApiSettings.getTempFilePrefix(),
-            sourceApiSettings.getTempFileSuffix()
+            sourceApi.getTempFilePrefix(),
+            sourceApi.getTempFileSuffix()
         );
         
         Files.write(tempFile, response.getBody().getBytes(), StandardOpenOption.WRITE);
@@ -261,7 +223,7 @@ public class SourceApiService {
     }
 }
 
-// 8. DestinationApiService.java
+// 6. DestinationApiService.java
 package com.sgcib.financing.lib.job.core.service;
 
 import com.sgcib.financing.lib.job.core.config.JobSettings;
@@ -280,22 +242,22 @@ import java.nio.file.Files;
 
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "batch-job.destination.api.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "batch-job.destination-api.enabled", havingValue = "true")
 public class DestinationApiService {
     
-    private DestinationApiSettings destinationApiSettings;
+    private DestinationApiSettings destinationApi;
     private RestTemplate restTemplate;
     
     @Autowired
     public void setJobSettings(JobSettings settings) {
-        this.destinationApiSettings = settings.getDestination().getApi();
-        Assert.notNull(destinationApiSettings, "Destination API settings is required");
+        this.destinationApi = settings.getDestinationApi();
+        Assert.notNull(destinationApi, "Destination API settings is required");
         
         this.restTemplate = new RestTemplate();
         
         // Configure RestTemplate timeouts
-        restTemplate.getRequestFactory().setConnectTimeout(destinationApiSettings.getConnectTimeout());
-        restTemplate.getRequestFactory().setReadTimeout(destinationApiSettings.getReadTimeout());
+        restTemplate.getRequestFactory().setConnectTimeout(destinationApi.getConnectTimeout());
+        restTemplate.getRequestFactory().setReadTimeout(destinationApi.getReadTimeout());
     }
     
     public void sendData(File tempFile) throws IOException {
@@ -306,31 +268,31 @@ public class DestinationApiService {
         sendRequest(jsonContent);
         
         // Clean up temp file
-        if (destinationApiSettings.isDeleteTempFileAfterUse()) {
+        if (destinationApi.isDeleteTempFileAfterUse()) {
             boolean deleted = tempFile.delete();
             log.info("Temp file {} deleted: {}", tempFile.getName(), deleted);
         }
     }
     
     private void sendRequest(String payload) {
-        UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(destinationApiSettings.getUrl());
-        if (destinationApiSettings.getQueryParams() != null) {
-            destinationApiSettings.getQueryParams().forEach(uriBuilder::queryParam);
+        UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(destinationApi.getUrl());
+        if (destinationApi.getQueryParams() != null) {
+            destinationApi.getQueryParams().forEach(uriBuilder::queryParam);
         }
         
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (destinationApiSettings.getHeaders() != null) {
-            destinationApiSettings.getHeaders().forEach(headers::add);
+        if (destinationApi.getHeaders() != null) {
+            destinationApi.getHeaders().forEach(headers::add);
         }
         
         int attempts = 0;
-        while (attempts < destinationApiSettings.getRetryCount()) {
+        while (attempts < destinationApi.getRetryCount()) {
             try {
                 ResponseEntity<String> response;
-                HttpMethod method = HttpMethod.valueOf(destinationApiSettings.getMethod());
+                HttpMethod method = HttpMethod.valueOf(destinationApi.getMethod());
                 
-                if ("GET".equals(destinationApiSettings.getMethod())) {
+                if ("GET".equals(destinationApi.getMethod())) {
                     HttpEntity<String> entity = new HttpEntity<>(headers);
                     response = restTemplate.exchange(
                         uriBuilder.toUriString(),
@@ -356,11 +318,11 @@ public class DestinationApiService {
             } catch (Exception e) {
                 attempts++;
                 log.warn("Attempt {} failed for destination API: {}", attempts, e.getMessage());
-                if (attempts >= destinationApiSettings.getRetryCount()) {
+                if (attempts >= destinationApi.getRetryCount()) {
                     throw new RuntimeException("Failed to send to destination API after " + attempts + " attempts", e);
                 }
                 try {
-                    Thread.sleep(destinationApiSettings.getRetryDelay());
+                    Thread.sleep(destinationApi.getRetryDelay());
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                 }
@@ -371,7 +333,7 @@ public class DestinationApiService {
 
 // ============= Tasklet Class =============
 
-// 9. Api2ApiTasklet.java
+// 7. Api2ApiTasklet.java
 package com.sgcib.financing.lib.job.core.tasklet;
 
 import com.sgcib.financing.lib.job.core.service.SourceApiService;
@@ -428,7 +390,7 @@ public class Api2ApiTasklet implements Tasklet {
 
 // ============= Flow Configuration =============
 
-// 10. JobFlowType.java
+// 8. JobFlowType.java
 package com.sgcib.financing.lib.job.core.config.flows;
 
 public enum JobFlowType {
@@ -436,7 +398,7 @@ public enum JobFlowType {
     // Add other flow types as needed
 }
 
-// 11. Api2ApiFlow.java
+// 9. Api2ApiFlow.java
 package com.sgcib.financing.lib.job.core.config.flows;
 
 import com.sgcib.financing.lib.job.core.config.JobSettings;
@@ -469,51 +431,33 @@ public class Api2ApiFlow extends AbstractJobConfiguration {
     }
 }
 
-// 12. StepsConfiguration.java
+// 10. StepsConfiguration.java (Add these methods to your existing class)
 package com.sgcib.financing.lib.job.core.config.job;
 
-import com.sgcib.financing.lib.job.core.config.JobSettings;
-import com.sgcib.financing.lib.job.core.tasklet.Api2ApiTasklet;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import org.springframework.batch.core.Step;
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+// ... existing imports and class declaration ...
 
-@Getter
-@AllArgsConstructor
-@Configuration
-@EnableConfigurationProperties({JobSettings.class})
-public class StepsConfiguration {
-    private final StepBuilderFactory stepFactory;
-    private final JobSettings properties;
-    
-    // ... your existing steps ...
-    
-    @Bean
-    @ConditionalOnProperty(value = {"batch-job.source.api.enabled", "batch-job.destination.api.enabled"}, 
-                           havingValue = "true")
-    public Api2ApiTasklet api2ApiTasklet() {
-        return new Api2ApiTasklet();
-    }
-    
-    @Bean
-    @ConditionalOnProperty(value = {"batch-job.source.api.enabled", "batch-job.destination.api.enabled"}, 
-                           havingValue = "true")
-    public Step api2ApiTransferStep() {
-        return stepFactory.get("api2api_transfer")
-                .allowStartIfComplete(false)
-                .tasklet(api2ApiTasklet())
-                .build();
-    }
+@Bean
+@ConditionalOnProperty(value = {"batch-job.source-api.enabled", "batch-job.destination-api.enabled"}, 
+                       havingValue = "true")
+public Api2ApiTasklet api2ApiTasklet() {
+    return new Api2ApiTasklet();
 }
 
-// 13. JobSettings.java
+@Bean
+@ConditionalOnProperty(value = {"batch-job.source-api.enabled", "batch-job.destination-api.enabled"}, 
+                       havingValue = "true")
+public Step api2ApiTransferStep() {
+    return stepFactory.get("api2api_transfer")
+            .allowStartIfComplete(false)
+            .tasklet(api2ApiTasklet())
+            .build();
+}
+
+// 11. JobSettings.java (Update your existing JobSettings)
 package com.sgcib.financing.lib.job.core.config;
 
+import com.sgcib.financing.lib.job.core.config.api.SourceApiSettings;
+import com.sgcib.financing.lib.job.core.config.api.DestinationApiSettings;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -524,17 +468,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class JobSettings {
     private String name;
     private JobFlowType flowType;
-    private SourceSettings source;
-    private DestinationSettings destination;
     
-    // ... other properties ...
+    // Direct API settings - no wrapper classes!
+    private SourceApiSettings sourceApi;
+    private DestinationApiSettings destinationApi;
+    
+    // ... your other existing properties ...
     
     public void afterPropertiesSet() {
-        if (source != null) {
-            source.afterPropertiesSet();
+        if (sourceApi != null) {
+            sourceApi.afterPropertiesSet();
         }
-        if (destination != null) {
-            destination.afterPropertiesSet();
+        if (destinationApi != null) {
+            destinationApi.afterPropertiesSet();
         }
     }
 }
@@ -545,35 +491,33 @@ batch-job:
   name: my-api-transfer-job
   flow-type: API_TO_API
   
-  source:
-    api:
-      enabled: true
-      url: https://api.source.com/data
-      method: GET
-      headers:
-        X-API-Key: ${SOURCE_API_KEY}
-        Accept: application/json
-      query-params:
-        limit: 1000
-        format: json
-      connect-timeout: 30000
-      read-timeout: 60000
-      retry-count: 3
-      retry-delay: 1000
-      temp-file-prefix: api_source_
-      temp-file-suffix: .json
+  source-api:
+    enabled: true
+    url: https://api.source.com/data
+    method: GET
+    headers:
+      X-API-Key: ${SOURCE_API_KEY}
+      Accept: application/json
+    query-params:
+      limit: 1000
+      format: json
+    connect-timeout: 30000
+    read-timeout: 10      # 10ms si tu veux vraiment
+    retry-count: 3
+    retry-delay: 1000
+    temp-file-prefix: api_source_
+    temp-file-suffix: .json
       
-  destination:
-    api:
-      enabled: true
-      url: https://api.destination.com/import
-      method: POST
-      headers:
-        X-API-Key: ${DEST_API_KEY}
-        Content-Type: application/json
-      connect-timeout: 30000
-      read-timeout: 120000
-      retry-count: 5
-      retry-delay: 2000
-      delete-temp-file-after-use: true
+  destination-api:
+    enabled: true
+    url: https://api.destination.com/import
+    method: POST
+    headers:
+      X-API-Key: ${DEST_API_KEY}
+      Content-Type: application/json
+    connect-timeout: 30000
+    read-timeout: 120000
+    retry-count: 5
+    retry-delay: 2000
+    delete-temp-file-after-use: true
 */
