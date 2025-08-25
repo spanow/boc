@@ -124,6 +124,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 import org.springframework.web.client.RestTemplate;
@@ -147,11 +148,12 @@ public class SourceApiService {
         this.sourceApi = settings.getSourceApi();
         Assert.notNull(sourceApi, "Source API settings is required");
         
-        this.restTemplate = new RestTemplate();
+        // Configure RestTemplate with timeouts
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(sourceApi.getConnectTimeout());
+        factory.setReadTimeout(sourceApi.getReadTimeout());
         
-        // Configure RestTemplate timeouts
-        restTemplate.getRequestFactory().setConnectTimeout(sourceApi.getConnectTimeout());
-        restTemplate.getRequestFactory().setReadTimeout(sourceApi.getReadTimeout());
+        this.restTemplate = new RestTemplate(factory);
     }
     
     public File fetchData() throws IOException {
@@ -232,6 +234,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 import org.springframework.web.client.RestTemplate;
@@ -253,11 +256,12 @@ public class DestinationApiService {
         this.destinationApi = settings.getDestinationApi();
         Assert.notNull(destinationApi, "Destination API settings is required");
         
-        this.restTemplate = new RestTemplate();
+        // Configure RestTemplate with timeouts
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(destinationApi.getConnectTimeout());
+        factory.setReadTimeout(destinationApi.getReadTimeout());
         
-        // Configure RestTemplate timeouts
-        restTemplate.getRequestFactory().setConnectTimeout(destinationApi.getConnectTimeout());
-        restTemplate.getRequestFactory().setReadTimeout(destinationApi.getReadTimeout());
+        this.restTemplate = new RestTemplate(factory);
     }
     
     public void sendData(File tempFile) throws IOException {
