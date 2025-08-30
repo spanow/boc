@@ -1,0 +1,334 @@
+// ============= TASKLET CORRIGÉ DANS LE STARTER =============
+// Api2ApiTasklet.java (dans job-core-starter)
+package com.sgcib.financing.lib.job.core.tasklet;
+
+import com.sgcib.financing.lib.job.core.service.SourceApiService;
+import com.sgcib.financing.lib.job.core.service.DestinationApiService;
+import com.sgcib.financing.lib.job.core.config.JobSettings;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.core.StepContribution;
+import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.NonNull;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+
+@Slf4j
+public class Api2ApiTasklet implements Tasklet {
+    
+    @Autowired
+    private SourceApiService sourceApiService;
+    
+    @Autowired
+    private DestinationApiService destinationApiService;
+    
+    @Autowired
+    private JobSettings jobSettings;
+    
+    @Autowired
+    private BeanFactory beanFactory;
+    
+    @Override
+    public RepeatStatus execute(@NonNull StepContribution stepContribution, 
+                                @NonNull ChunkContext chunkContext) throws Exception {
+        
+        log.info("Starting API to API transfer");
+        
+        try {
+            // ÉTAPE 1: Récupérer les données depuis l'API source et sauvegarder dans un fichier temp
+            File sourceDataFile = sourceApiService.fetchData();
+            log.info("Data fetched from source API and saved to: {}", sourceDataFile.getAbsolutePath());
+            
+            // ÉTAPE 2: Appliquer le processor si configuré
+            File fileToSend;
+            if (jobSettings.getProcessorClass() != null && !jobSettings.getProcessorClass().isEmpty()) {
+                log.info("Processor configured: {}", jobSettings.getProcessorClass());
+                fileToSend = processFile(sourceDataFile);
+                
+                // Optionnel: supprimer le fichier source original après processing
+                if (sourceDataFile.exists() && !sourceDataFile.equals(fileToSend)) {
+                    sourceDataFile.delete();
+                    log.debug("Original source file deleted after processing");
+                }
+            } else {
+                log.info("No processor configured, sending raw data");
+                fileToSend = sourceDataFile;
+            }
+            
+            // ÉTAPE 3: Envoyer les données (transformées ou non) vers l'API destination
+            destinationApiService.sendData(fileToSend);
+            
+            // Stocker les stats dans le contexte si besoin
+            chunkContext.getStepContext()
+                .getStepExecution()
+                .getJobExecution()
+                .getExecutionContext()
+                .put("source_file", sourceDataFile.getName());
+            
+            if (!sourceDataFile.equals(fileToSend)) {
+                chunkContext.getStepContext()
+                    .getStepExecution()
+                    .getJobExecution()
+                    .getExecutionContext()
+                    .put("processed_file", fileToSend.getName());
+            }
+            
+            log.info("API to API transfer completed successfully");
+            
+        } catch (Exception e) {
+            log.error("Error during API to API transfer", e);
+            throw e;
+        }
+        
+        return RepeatStatus.FINISHED;
+    }
+    
+    @SuppressWarnings("unchecked")
+    private File processFile(File sourceFile) throws Exception {
+        String processorClassName = jobSettings.getProcessorClass();
+        
+        try {
+            // Charger la classe du processor
+            Class<?> processorClass = Class.forName(processorClassName);
+            
+            // Récupérer le bean du processor depuis le contexte Spring
+            ItemProcessor<String, String> processor = 
+                (ItemProcessor<String, String>) beanFactory.getBean(processorClass);
+            
+            log.info("Loading processor: {}", processorClassName);
+            
+            // LIRE LE CONTENU DU FICHIER TEMPORAIRE
+            String sourceContent = Files.readString(sourceFile.toPath());
+            log.debug("Read {} bytes from source file", sourceContent.length());
+            
+            // APPLIQUER LE PROCESSOR SUR LE CONTENU
+            String processedContent = processor.process(sourceContent);
+            log.debug("Processed content size: {} bytes", processedContent.length());
+            
+            // ÉCRIRE LE RÉSULTAT DANS UN NOUVEAU FICHIER TEMPORAIRE
+            Path processedFile = Files.createTempFile("processed_", ".json");
+            Files.write(processedFile, processedContent.getBytes(), StandardOpenOption.WRITE);
+            
+            log.info("Data processed and saved to: {}", processedFile.toAbsolutePath());
+            
+            return processedFile.toFile();
+            
+        } catch (ClassNotFoundException e) {
+            log.error("Processor class not found: {}", processorClassName);
+            throw new RuntimeException("Invalid processor class: " + processorClassName, e);
+        } catch (Exception e) {
+            log.error("Error during processing with {}: {}", processorClassName, e.getMessage());
+            throw e;
+        }
+    }
+}
+
+// ============= LE PROCESSOR DANS TON MICROSERVICE =============
+// ShadowEquityProcessor.java (dans position-inventory-task)
+package com.sgcib.position.inventory.task.processor;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.batch.item.ItemProcessor;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+@Component
+public class ShadowEquityProcessor implements ItemProcessor<String, String> {
+    
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    
+    @Override
+    public String process(String jsonContent) throws Exception {
+        // ICI ON REÇOIT LE CONTENU DU FICHIER TEMPORAIRE COMME STRING
+        log.info("Processing Shadow Equity data from temp file content");
+        log.debug("Input content size: {} characters", jsonContent.length());
+        
+        // Parse le JSON qui vient du fichier
+        JsonNode rootNode = objectMapper.readTree(jsonContent);
+        
+        // Liste pour stocker les données transformées
+        List<ObjectNode> transformedRecords = new ArrayList<>();
+        int totalRecords = 0;
+        int filteredOut = 0;
+        
+        // Process selon la structure du JSON
+        if (rootNode.isArray()) {
+            for (JsonNode record : rootNode) {
+                totalRecords++;
+                if (!processRecord(record, transformedRecords)) {
+                    filteredOut++;
+                }
+            }
+        } else if (rootNode.isObject()) {
+            // Chercher le tableau de données
+            JsonNode dataArray = findDataArray(rootNode);
+            if (dataArray != null && dataArray.isArray()) {
+                for (JsonNode record : dataArray) {
+                    totalRecords++;
+                    if (!processRecord(record, transformedRecords)) {
+                        filteredOut++;
+                    }
+                }
+            }
+        }
+        
+        // Créer le JSON de sortie
+        ArrayNode outputArray = objectMapper.createArrayNode();
+        transformedRecords.forEach(outputArray::add);
+        
+        String result = objectMapper.writeValueAsString(outputArray);
+        
+        log.info("Processing complete: {} total records, {} filtered out, {} kept",
+                totalRecords, filteredOut, transformedRecords.size());
+        log.debug("Output content size: {} characters", result.length());
+        
+        // RETOURNER LE NOUVEAU JSON QUI SERA ÉCRIT DANS UN NOUVEAU FICHIER TEMP
+        return result;
+    }
+    
+    private JsonNode findDataArray(JsonNode root) {
+        String[] possibleFields = {"data", "results", "items", "records", "positions"};
+        for (String field : possibleFields) {
+            JsonNode node = root.get(field);
+            if (node != null && node.isArray()) {
+                log.debug("Found data array in field: {}", field);
+                return node;
+            }
+        }
+        return null;
+    }
+    
+    private boolean processRecord(JsonNode record, List<ObjectNode> transformedRecords) {
+        // Vérifier accountHierarchy
+        JsonNode accountHierarchyNode = record.get("accountHierarchy");
+        if (accountHierarchyNode == null) {
+            log.trace("Record skipped: no accountHierarchy field");
+            return false;
+        }
+        
+        String accountHierarchy = accountHierarchyNode.asText();
+        
+        // FILTRAGE: Garder seulement STANDALONE et CHILD
+        if (!"STANDALONE".equals(accountHierarchy) && !"CHILD".equals(accountHierarchy)) {
+            log.trace("Record skipped: accountHierarchy = {}", accountHierarchy);
+            return false;
+        }
+        
+        // Extraire les champs nécessaires
+        JsonNode shadowAccountNode = record.get("shadowAccount");
+        JsonNode memoSegNode = record.get("memoSeg");
+        
+        if (shadowAccountNode == null || memoSegNode == null) {
+            log.warn("Record skipped: missing shadowAccount or memoSeg");
+            return false;
+        }
+        
+        // Créer l'objet transformé
+        ObjectNode transformedRecord = objectMapper.createObjectNode();
+        transformedRecord.put("acc_id", shadowAccountNode.asText());
+        transformedRecord.put("qty", memoSegNode.asDouble());
+        
+        transformedRecords.add(transformedRecord);
+        log.trace("Record transformed: acc_id={}, qty={}", 
+                shadowAccountNode.asText(), memoSegNode.asDouble());
+        
+        return true;
+    }
+}
+
+// ============= FLUX COMPLET EXPLIQUÉ =============
+/*
+FLUX DÉTAILLÉ:
+
+1. SourceApiService.fetchData():
+   - Appelle l'API X avec {"assetType": "SHADOW_EQUITY"}
+   - Reçoit la réponse JSON
+   - Sauve dans fichier temp: /tmp/shadow_equity_xxx.json
+
+2. Api2ApiTasklet.processFile():
+   - LIT le contenu du fichier /tmp/shadow_equity_xxx.json
+   - Passe ce contenu (String) au processor
+   
+3. ShadowEquityProcessor.process(String jsonContent):
+   - Reçoit le contenu JSON comme String
+   - Parse et filtre (garde STANDALONE et CHILD)
+   - Transforme (shadowAccount→acc_id, memoSeg→qty)
+   - Retourne le nouveau JSON comme String
+   
+4. Api2ApiTasklet.processFile() (suite):
+   - Reçoit le JSON transformé
+   - ÉCRIT dans nouveau fichier: /tmp/processed_xxx.json
+   
+5. DestinationApiService.sendData():
+   - LIT le fichier /tmp/processed_xxx.json
+   - Envoie le contenu à l'API Y
+   - Supprime le fichier temp
+
+FICHIERS CRÉÉS:
+- /tmp/shadow_equity_xxx.json (données source brutes)
+- /tmp/processed_xxx.json (données transformées)
+*/
+
+// ============= TEST UNITAIRE POUR LE PROCESSOR =============
+// ShadowEquityProcessorTest.java
+package com.sgcib.position.inventory.task.processor;
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class ShadowEquityProcessorTest {
+    
+    private ShadowEquityProcessor processor = new ShadowEquityProcessor();
+    
+    @Test
+    void testProcessFiltersCorrectly() throws Exception {
+        // Input JSON (comme ce que tu reçois de l'API)
+        String input = """
+            [
+                {
+                    "shadowAccount": "ACC001",
+                    "memoSeg": 100.50,
+                    "accountHierarchy": "STANDALONE"
+                },
+                {
+                    "shadowAccount": "ACC002",
+                    "memoSeg": 200.00,
+                    "accountHierarchy": "PARENT"
+                },
+                {
+                    "shadowAccount": "ACC003",
+                    "memoSeg": 300.75,
+                    "accountHierarchy": "CHILD"
+                }
+            ]
+            """;
+        
+        // Process
+        String output = processor.process(input);
+        
+        // Expected output (PARENT filtré)
+        String expected = """
+            [
+                {"acc_id":"ACC001","qty":100.5},
+                {"acc_id":"ACC003","qty":300.75}
+            ]
+            """;
+        
+        // Vérifier
+        assertEquals(expected.replaceAll("\\s", ""), output.replaceAll("\\s", ""));
+    }
+}
