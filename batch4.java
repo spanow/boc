@@ -98,6 +98,39 @@ public class ShadowEquityProcessor implements ProcessorJsonBeanToJsonBean {
     }
 }
 
+// 6. READER/WRITER TEMPORAIRES (tu les remplaceras)
+// TempJsonReader.java - TEMPORAIRE
+package com.sgcib.position.inventory.task.reader;
+
+import com.sgcib.financing.lib.job.core.model.JSONBean;
+import org.springframework.batch.item.ItemReader;
+import org.springframework.stereotype.Component;
+
+@Component("jsonReader")
+public class TempJsonReader implements ItemReader<JSONBean> {
+    @Override
+    public JSONBean read() {
+        // TEMPORAIRE - tu implémenteras le vrai reader
+        return null;
+    }
+}
+
+// TempJsonWriter.java - TEMPORAIRE
+package com.sgcib.position.inventory.task.writer;
+
+import com.sgcib.financing.lib.job.core.model.JSONBean;
+import org.springframework.batch.item.ItemWriter;
+import org.springframework.stereotype.Component;
+import java.util.List;
+
+@Component("jsonWriter")
+public class TempJsonWriter implements ItemWriter<JSONBean> {
+    @Override
+    public void write(List<? extends JSONBean> items) {
+        // TEMPORAIRE - tu implémenteras le vrai writer
+    }
+}
+
 // ============= APPLICATION.YML =============
 /*
 batch-job:
